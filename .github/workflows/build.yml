@@ -103,33 +103,40 @@ jobs:
           rm -rf .repo
           rm -rf common
 
-          # ZyC Clang Implementation
+          # Descarga de ZyC Clang
           TOOLCHAIN="${{ env.WORK_DIR }}/zyc-clang"
           wget "$(curl -s https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-main-link.txt)" -O "zyc-clang.tar.gz"
           mkdir -p ${TOOLCHAIN}
           tar -xf zyc-clang.tar.gz -C ${TOOLCHAIN}
 
-          # Definimos la ruta que el build script de Google espera
+          # Definición de rutas donde Google busca el compilador
           ANDROID_CLANG_DIR="${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e"
+          BUILD_TOOLS_PATH="${{ env.WORK_DIR }}/build/kernel/build-tools/path/linux-x86"
           
-          # Borramos lo que haya y forzamos nuestra estructura
+          # Inyectamos el compilador en la ruta predeterminada de Android
           rm -rf ${ANDROID_CLANG_DIR}
           mkdir -p ${ANDROID_CLANG_DIR}
-          
-          # Movemos todo el contenido del ZyC Clang a la carpeta que Google SI revisa
           cp -af ${TOOLCHAIN}/* ${ANDROID_CLANG_DIR}/
           
-          # Creamos enlaces simbólicos internos para asegurar que 'clang' exista
-          cd ${ANDROID_CLANG_DIR}/bin
-          ln -sf clang-[0-9]* clang
-          ln -sf clang++-[0-9]* clang++
-          ln -sf ld.lld lld
+          # FORZADO: Creamos enlaces en la carpeta de herramientas de 'build'
+          mkdir -p ${BUILD_TOOLS_PATH}
+          ln -sf ${ANDROID_CLANG_DIR}/bin/clang ${BUILD_TOOLS_PATH}/clang
+          ln -sf ${ANDROID_CLANG_DIR}/bin/clang++ ${BUILD_TOOLS_PATH}/clang++
+          ln -sf ${ANDROID_CLANG_DIR}/bin/ld.lld ${BUILD_TOOLS_PATH}/ld.lld
+          ln -sf ${ANDROID_CLANG_DIR}/bin/llvm-nm ${BUILD_TOOLS_PATH}/llvm-nm
           
-          # Agregamos esta ruta al PATH global de GitHub de nuevo por seguridad
+          # Asegurar que el binario genérico 'clang' exista dentro de su propia carpeta
+          cd ${ANDROID_CLANG_DIR}/bin
+          [ ! -f clang ] && ln -sf clang-[0-9]* clang
+          [ ! -f clang++ ] && ln -sf clang++-[0-9]* clang++
+          
+          # Actualizamos el PATH del sistema de GitHub
           echo "${ANDROID_CLANG_DIR}/bin" >> $GITHUB_PATH
+          echo "${BUILD_TOOLS_PATH}" >> $GITHUB_PATH
           
           cd ${{ env.WORK_DIR }}
           
+          # Configuración de constantes para que reconozca a ZyC
           sed -i \
            -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
            -e 's/^CLANG_VERSION=.*/CLANG_VERSION=zyc-clang/' \
@@ -326,10 +333,17 @@ jobs:
         timeout-minutes: 60
         run: |
           set -e
-          # 1. Forzamos el PATH al inicio del bloque
-          export PATH="${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH"
+          # Re-declaramos rutas para asegurar visibilidad total
+          export PATH="${{ env.WORK_DIR }}/build/kernel/build-tools/path/linux-x86:${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH"
           
-          echo "🚀 Starting kernel build with $(nproc) cores..."
+          # Variables de entorno críticas para compilación con LLVM
+          export LLVM=1
+          export LLVM_IAS=1
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
+          export LINUX_GCC_CROSS_COMPILE_PREBUILT_BIN=aarch64-linux-android-
+          
+          echo "🚀 Iniciando compilación GKI con PATH inyectado..."
           
           export LTO=thin
           export SKIP_ABI_CHECKS=1
@@ -337,6 +351,7 @@ jobs:
           
           START_BUILD=$(date +%s)
           
+          # Ejecución del script oficial de Android
           if ! BUILD_CONFIG=${{ env.KERNEL_LOC_DIR }}/${{ env.KERNEL_NAME }}/build.config.gki.aarch64 \
             build/build.sh -j$(nproc); then
             echo "BUILD_FAILED=1" >> $GITHUB_ENV
@@ -345,9 +360,9 @@ jobs:
           
           END_BUILD=$(date +%s)
           DURATION=$((END_BUILD - START_BUILD))
-          echo "✅ Build completed in $((DURATION / 60))m $((DURATION % 60))s"
-          
+          echo "✅ Build finalizado en $((DURATION / 60))m $((DURATION % 60))s"
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          
       - name: "Verify kernel version"
         working-directory: ${{ env.WORK_DIR }}/out/dist
         run: |
