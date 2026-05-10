@@ -106,34 +106,25 @@ jobs:
           # ZyC Clang Implementation
           TOOLCHAIN="${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/zyc-clang"
           wget "$(curl -s https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-main-link.txt)" -O "zyc-clang.tar.gz"
-          mkdir -p ${TOOLCHAIN} && tar -xf zyc-clang.tar.gz -C ${TOOLCHAIN}
+          mkdir -p ${TOOLCHAIN}
+          tar -xf zyc-clang.tar.gz -C ${TOOLCHAIN}
 
-          # 🔥 FIX: Copy ZyC clang into Android expected directory
+          # Agregamos los binarios al PATH del sistema
+          echo "${TOOLCHAIN}/bin" >> $GITHUB_PATH
+          
+          # Link para que el build script lo encuentre
           ANDROID_CLANG_DIR="${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e"
           rm -rf ${ANDROID_CLANG_DIR}
-          cp -r ${TOOLCHAIN} ${ANDROID_CLANG_DIR}
+          ln -sf ${TOOLCHAIN} ${ANDROID_CLANG_DIR}
 
-          # Create required symlinks safely
+          # Forzar creación de enlaces simbólicos genéricos
           cd ${TOOLCHAIN}/bin
-          CLANG_BIN=$(ls clang-[0-9]* | head -n 1)
-          if [ -n "$CLANG_BIN" ]; then
-            ln -sf "$CLANG_BIN" clang
-            ln -sf "$CLANG_BIN" clang++
-          fi
-
-          # Only create lld symlink if missing
-          if [ ! -e lld ] && [ -e ld.lld ]; then
-            ln -sf ld.lld lld
-          fi
-
-          cd ${{ env.WORK_DIR }}
+          ln -sf clang-[0-9]* clang || true
+          ln -sf clang++-[0-9]* clang++ || true
+          ln -sf ld.lld lld || true
           
-          echo "${TOOLCHAIN}/bin" >> $GITHUB_PATH
+          cd ${{ env.WORK_DIR }}
           rm -rf zyc-clang.tar.gz
-
-          rm -rf prebuilts/clang/host/linux-x86/clang-3289846
-          # (Removed deletion of clang-r450784e — required by build.sh)
-          rm -rf prebuilts/clang/host/linux-x86/clang-stable
           
           sed -i \
            -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
