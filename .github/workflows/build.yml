@@ -109,18 +109,24 @@ jobs:
           mkdir -p ${TOOLCHAIN}
           tar -xf zyc-clang.tar.gz -C ${TOOLCHAIN}
 
-          # Agregamos al PATH de forma absoluta
-          echo "${TOOLCHAIN}/bin" >> $GITHUB_PATH
+          # Definimos la ruta que el build script de Google espera
+          ANDROID_CLANG_DIR="${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e"
           
-          # Creamos los enlaces en la carpeta de prebuilts de Android para que no se pierdan
-          mkdir -p ${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e/bin
-          cp -rs ${TOOLCHAIN}/* ${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e/
+          # Borramos lo que haya y forzamos nuestra estructura
+          rm -rf ${ANDROID_CLANG_DIR}
+          mkdir -p ${ANDROID_CLANG_DIR}
           
-          # Aseguramos binarios esenciales
-          cd ${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e/bin
-          ln -sf clang-19 clang || ln -sf clang-[0-9]* clang
-          ln -sf clang++-19 clang++ || ln -sf clang++-[0-9]* clang++
+          # Movemos todo el contenido del ZyC Clang a la carpeta que Google SI revisa
+          cp -af ${TOOLCHAIN}/* ${ANDROID_CLANG_DIR}/
+          
+          # Creamos enlaces simbólicos internos para asegurar que 'clang' exista
+          cd ${ANDROID_CLANG_DIR}/bin
+          ln -sf clang-[0-9]* clang
+          ln -sf clang++-[0-9]* clang++
           ln -sf ld.lld lld
+          
+          # Agregamos esta ruta al PATH global de GitHub de nuevo por seguridad
+          echo "${ANDROID_CLANG_DIR}/bin" >> $GITHUB_PATH
           
           cd ${{ env.WORK_DIR }}
           
@@ -320,9 +326,8 @@ jobs:
         timeout-minutes: 60
         run: |
           set -e
-          # RE-FIX: Explicitly Export Path inside the build run block
-          TOOLCHAIN_BIN="${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/zyc-clang/bin"
-          export PATH="${TOOLCHAIN_BIN}:$PATH"
+          # 1. Forzamos el PATH al inicio del bloque
+          export PATH="${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH"
           
           echo "🚀 Starting kernel build with $(nproc) cores..."
           
@@ -343,7 +348,6 @@ jobs:
           echo "✅ Build completed in $((DURATION / 60))m $((DURATION % 60))s"
           
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
-
       - name: "Verify kernel version"
         working-directory: ${{ env.WORK_DIR }}/out/dist
         run: |
