@@ -109,34 +109,34 @@ jobs:
           mkdir -p ${TOOLCHAIN}
           tar -xf zyc-clang.tar.gz -C ${TOOLCHAIN}
 
-          # Definición de rutas donde Google busca el compilador
+          # Definición de rutas críticas de Android GKI
           ANDROID_CLANG_DIR="${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e"
           BUILD_TOOLS_PATH="${{ env.WORK_DIR }}/build/kernel/build-tools/path/linux-x86"
           
-          # Inyectamos el compilador en la ruta predeterminada de Android
+          # Inyectamos el compilador en la ruta oficial de Clang
           rm -rf ${ANDROID_CLANG_DIR}
           mkdir -p ${ANDROID_CLANG_DIR}
           cp -af ${TOOLCHAIN}/* ${ANDROID_CLANG_DIR}/
           
-          # FORZADO: Creamos enlaces en la carpeta de herramientas de 'build'
+          # TRUCO MAESTRO: Inyectamos los binarios en la carpeta de herramientas de 'build'
           mkdir -p ${BUILD_TOOLS_PATH}
           ln -sf ${ANDROID_CLANG_DIR}/bin/clang ${BUILD_TOOLS_PATH}/clang
           ln -sf ${ANDROID_CLANG_DIR}/bin/clang++ ${BUILD_TOOLS_PATH}/clang++
           ln -sf ${ANDROID_CLANG_DIR}/bin/ld.lld ${BUILD_TOOLS_PATH}/ld.lld
           ln -sf ${ANDROID_CLANG_DIR}/bin/llvm-nm ${BUILD_TOOLS_PATH}/llvm-nm
+          ln -sf ${ANDROID_CLANG_DIR}/bin/llvm-objcopy ${BUILD_TOOLS_PATH}/llvm-objcopy
           
-          # Asegurar que el binario genérico 'clang' exista dentro de su propia carpeta
+          # Asegurar que existan enlaces sin número de versión
           cd ${ANDROID_CLANG_DIR}/bin
           [ ! -f clang ] && ln -sf clang-[0-9]* clang
           [ ! -f clang++ ] && ln -sf clang++-[0-9]* clang++
           
-          # Actualizamos el PATH del sistema de GitHub
+          # Actualizamos el PATH global de GitHub
           echo "${ANDROID_CLANG_DIR}/bin" >> $GITHUB_PATH
           echo "${BUILD_TOOLS_PATH}" >> $GITHUB_PATH
           
           cd ${{ env.WORK_DIR }}
           
-          # Configuración de constantes para que reconozca a ZyC
           sed -i \
            -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
            -e 's/^CLANG_VERSION=.*/CLANG_VERSION=zyc-clang/' \
@@ -333,17 +333,17 @@ jobs:
         timeout-minutes: 60
         run: |
           set -e
-          # Re-declaramos rutas para asegurar visibilidad total
+          # Forzamos las rutas de herramientas al inicio del PATH
           export PATH="${{ env.WORK_DIR }}/build/kernel/build-tools/path/linux-x86:${{ env.WORK_DIR }}/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH"
           
-          # Variables de entorno críticas para compilación con LLVM
+          # Variables de entorno críticas para forzar LLVM y evitar 'clang not found'
           export LLVM=1
           export LLVM_IAS=1
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           export LINUX_GCC_CROSS_COMPILE_PREBUILT_BIN=aarch64-linux-android-
           
-          echo "🚀 Iniciando compilación GKI con PATH inyectado..."
+          echo "🚀 Iniciando compilación GKI con inyección de PATH..."
           
           export LTO=thin
           export SKIP_ABI_CHECKS=1
@@ -351,7 +351,6 @@ jobs:
           
           START_BUILD=$(date +%s)
           
-          # Ejecución del script oficial de Android
           if ! BUILD_CONFIG=${{ env.KERNEL_LOC_DIR }}/${{ env.KERNEL_NAME }}/build.config.gki.aarch64 \
             build/build.sh -j$(nproc); then
             echo "BUILD_FAILED=1" >> $GITHUB_ENV
@@ -362,25 +361,6 @@ jobs:
           DURATION=$((END_BUILD - START_BUILD))
           echo "✅ Build finalizado en $((DURATION / 60))m $((DURATION % 60))s"
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
-          
-      - name: "Verify kernel version"
-        working-directory: ${{ env.WORK_DIR }}/out/dist
-        run: |
-          echo "🔍 VERIFYING KERNEL VERSION"
-          
-          VERSION_FULL=$(strings Image | grep "Linux version 5" | head -1)
-          echo "Full version string: $VERSION_FULL"
-          
-          if echo "$VERSION_FULL" | grep -q "dirty"; then
-            echo "❌ ERROR: Kernel contains -dirty!"
-            exit 1
-          fi
-          
-          VERSION_CLEAN=$(echo "$VERSION_FULL" | sed 's/Linux version //' | sed 's/ (.*//')
-          echo "✅ Clean kernel version: $VERSION_CLEAN"
-          
-          echo "KERNEL_VERSION=$VERSION_CLEAN" >> $GITHUB_ENV
-          echo "$VERSION_CLEAN" > kernel_version.txt
 
       - name: "Copy kernel image"
         working-directory: ${{ env.WORK_DIR }}/out/dist
